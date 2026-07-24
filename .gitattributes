@@ -1,0 +1,11 @@
+# Normalize line endings: LF in the repository, native on checkout.
+* text=auto
+
+*.cs text diff=csharp
+*.csproj text
+*.props text
+*.slnx text
+*.md text
+*.json text
+*.sh text eol=lf
+*.ps1 text

@@ -1,0 +1,21 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/Engine.Scripting.Sample.ConsoleDemo/Engine.Scripting.Sample.ConsoleDemo.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Engine.Scripting.Abstractions/Engine.Scripting.Abstractions.csproj" />
+    <Project Path="src/Engine.Scripting.Compilation/Engine.Scripting.Compilation.csproj" />
+    <Project Path="src/Engine.Scripting.Extensions.Hosting/Engine.Scripting.Extensions.Hosting.csproj" />
+    <Project Path="src/Engine.Scripting.Hosting/Engine.Scripting.Hosting.csproj" />
+    <Project Path="src/Engine.Scripting.Instances/Engine.Scripting.Instances.csproj" />
+    <Project Path="src/Engine.Scripting.Orchestration/Engine.Scripting.Orchestration.csproj" />
+    <Project Path="src/Engine.Scripting.StatePreservation/Engine.Scripting.StatePreservation.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Engine.Scripting.Compilation.Tests/Engine.Scripting.Compilation.Tests.csproj" />
+    <Project Path="tests/Engine.Scripting.Extensions.Hosting.Tests/Engine.Scripting.Extensions.Hosting.Tests.csproj" />
+    <Project Path="tests/Engine.Scripting.Hosting.Tests/Engine.Scripting.Hosting.Tests.csproj" />
+    <Project Path="tests/Engine.Scripting.Orchestration.Tests/Engine.Scripting.Orchestration.Tests.csproj" />
+    <Project Path="tests/Engine.Scripting.StatePreservation.Tests/Engine.Scripting.StatePreservation.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Dependency-free contracts for the Engine.Scripting hot-reload mechanism: script lifecycle hooks, state-preservation attribute, script/assembly sources and compiler abstraction.</Description>
+  </PropertyGroup>
+
+</Project>
