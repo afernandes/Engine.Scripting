@@ -397,7 +397,7 @@ Melhorias consideradas, em ordem de prioridade — nenhuma é pré-requisito par
 
 | # | Item | Motivação |
 |---|------|-----------|
-| 1 | **Pacote NuGet** ✅ *feito* — `dotnet pack` gera os 7 pacotes com metadata completa (licença MIT, repositório, autor), README embarcado e símbolos+fontes embedados na DLL (debug sem symbol server). **Pendente**: CI (GitHub Actions) e publicação em feed | Logística de reutilização entre projetos consumidores |
+| 1 | **Pacote NuGet + CI/CD** ✅ *feito* — `dotnet pack` gera os 7 pacotes com metadata completa (licença MIT, repositório, autor), README embarcado e símbolos+fontes embedados na DLL (debug sem symbol server); GitHub Actions faz build/test/pack em push-PR e publica no nuget.org por tag `v*` (ver [CI/CD](#cicd)) | Logística de reutilização entre projetos consumidores |
 | 2 | **`Engine.Scripting.Extensions.Hosting`** ✅ *feito* — `AddHotReloadScripting(...)` (com overload `IServiceProvider`), hosted service amarrado ao `ApplicationStopping`, scripts com injeção de construtor via `ActivatorUtilities` (coleta do ALC verificada por teste) | Scripts com dependências injetadas (ex.: regra de negócio recebendo repositório no construtor) em hosts ASP.NET Core |
 | 3 | **Rollback de geração + validação pré-swap** — ring buffer das últimas N `ScriptAssemblyImage`, validação do header PE antes do teardown, `RollbackAsync()` | Resiliência de produção: hoje, uma imagem corrompida detectada na fase C deixa o host sem geração; com rollback, regra ruim publicada → reversão em segundos |
 | 4 | **Gate de execução para swap atômico** (`IScriptExecutionGate`: leitores = chamadas de script, escritor = o swap) | Sob concorrência, hoje `GetAs<T>()` retorna `null` durante a fase B e threads executando script atrasam o unload; o gate fecha as duas lacunas |
@@ -410,6 +410,26 @@ Melhorias consideradas, em ordem de prioridade — nenhuma é pré-requisito par
 | 11 | **CLI `dotnet tool` de build** (compila a pasta de scripts → dll+pdb publicáveis) | Formalizar o passo de "ativação" do fluxo pré-compilado |
 
 **Fora de escopo por decisão** (armadilhas conhecidas): múltiplas assemblies de script com referências entre si (unload em cascata de ALCs interdependentes — uma geração presa segura a cadeia inteira; use N orchestrators independentes sem cross-referências) e restore de pacotes NuGet em runtime (superfície de segurança enorme; o modo pré-compilado já cobre o caso legítimo).
+
+## CI/CD
+
+| Workflow | Quando | O que faz |
+|---|---|---|
+| [`ci.yml`](.github/workflows/ci.yml) | push/PR em `main` | restore → build → **63 testes** → `pack` de validação, com os `.nupkg` como artifact |
+| [`release.yml`](.github/workflows/release.yml) | tag `v*` (ou manual) | valida a versão (SemVer) → build → **testes como gate** → `pack` versionado → publica os 7 pacotes no nuget.org → cria o GitHub Release |
+
+A versão vem da **tag** (o `VersionPrefix` de [`src/Directory.Build.props`](src/Directory.Build.props)
+serve a builds locais), separada em `VersionPrefix`/`VersionSuffix` — assim `v0.2.0-beta.1` publica
+como prerelease e cada projeto pode manter um sufixo próprio quando precisar.
+
+**Para publicar:**
+
+1. Crie o secret `NUGET_API_KEY` em *Settings → Secrets and variables → Actions*.
+2. `git tag v0.1.1 && git push origin v0.1.1`.
+3. Para ensaiar sem publicar: *Actions → Release → Run workflow* com `dry_run` marcado.
+
+> Os testes de unload são sensíveis a GC (`WeakReference` + coleta forçada, collection não-paralelizada),
+> por isso a suíte roda inteira num único job.
 
 ## Decisão de idioma
 

@@ -1,0 +1,112 @@
+name: Release
+
+# Dispara ao empurrar uma tag de versão: v0.1.1, v1.0.0, v0.2.0-beta.1 ...
+# A TAG é a fonte da verdade da versão (o VersionPrefix do src/Directory.Build.props serve
+# para builds locais). Publica os 7 pacotes no nuget.org e cria o GitHub Release.
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versão a publicar (ex.: 0.1.1 ou 0.2.0-beta.1)'
+        required: true
+      dry_run:
+        description: 'Só empacotar, sem publicar no nuget.org'
+        type: boolean
+        default: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  SOLUTION: Engine.Scripting.slnx
+
+permissions:
+  contents: write   # criar o GitHub Release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # Separa prefixo e sufixo: 0.2.0-beta.1 -> VersionPrefix=0.2.0, VersionSuffix=beta.1.
+      # (usar VersionPrefix/Suffix em vez de Version permite a cada projeto manter seu próprio
+      # sufixo quando precisa — ver o Extensio.Lua no repositório Extensio)
+      - name: Resolver versão
+        id: version
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Versão inválida: '$VERSION' (esperado SemVer, ex.: 0.1.1 ou 0.2.0-beta.1)"
+            exit 1
+          fi
+          echo "prefix=${VERSION%%-*}" >> "$GITHUB_OUTPUT"
+          case "$VERSION" in *-*) echo "suffix=${VERSION#*-}" >> "$GITHUB_OUTPUT" ;; *) echo "suffix=" >> "$GITHUB_OUTPUT" ;; esac
+          echo "full=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publicando versão $VERSION"
+
+      - name: Restore
+        run: dotnet restore ${{ env.SOLUTION }}
+
+      - name: Build
+        run: >-
+          dotnet build ${{ env.SOLUTION }} -c Release --no-restore
+          -p:VersionPrefix=${{ steps.version.outputs.prefix }}
+          -p:VersionSuffix=${{ steps.version.outputs.suffix }}
+
+      # Gate: nada é publicado com a suíte vermelha.
+      - name: Test
+        run: dotnet test ${{ env.SOLUTION }} -c Release --no-build
+
+      - name: Pack
+        run: >-
+          dotnet pack ${{ env.SOLUTION }} -c Release --no-build -o artifacts/packages
+          -p:VersionPrefix=${{ steps.version.outputs.prefix }}
+          -p:VersionSuffix=${{ steps.version.outputs.suffix }}
+
+      - name: Conferir pacotes
+        run: ls -lh artifacts/packages/
+
+      - name: Upload pacotes (artifact do run)
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg-${{ steps.version.outputs.full }}
+          path: artifacts/packages/*.nupkg
+
+      - name: Publicar no nuget.org
+        if: github.event_name == 'push' || inputs.dry_run == false
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NUGET_API_KEY:-}" ]; then
+            echo "::error::Secret NUGET_API_KEY não configurado (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+          dotnet nuget push "artifacts/packages/*.nupkg" \
+            --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      - name: Criar GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            artifacts/packages/*.nupkg \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes
