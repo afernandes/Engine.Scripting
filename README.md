@@ -415,10 +415,10 @@ Melhorias consideradas, em ordem de prioridade — nenhuma é pré-requisito par
 
 | Workflow | Quando | O que faz |
 |---|---|---|
-| [`ci.yml`](.github/workflows/ci.yml) | push/PR em `main` | restore → build → **63 testes** → `pack` de validação, com os `.nupkg` como artifact |
-| [`release.yml`](.github/workflows/release.yml) | tag `v*` (ou manual) | valida a versão (SemVer) → build → **testes como gate** → `pack` versionado → publica os 7 pacotes no nuget.org → cria o GitHub Release |
+| [`ci.yml`](https://github.com/afernandes/Engine.Scripting/blob/main/.github/workflows/ci.yml) | push/PR em `main` | restore → build → **63 testes** → `pack` de validação, com os `.nupkg` como artifact |
+| [`release.yml`](https://github.com/afernandes/Engine.Scripting/blob/main/.github/workflows/release.yml) | tag `v*` (ou manual) | valida a versão (SemVer) → build → **testes como gate** → `pack` versionado → publica os 7 pacotes no nuget.org → cria o GitHub Release |
 
-A versão vem da **tag** (o `VersionPrefix` de [`src/Directory.Build.props`](src/Directory.Build.props)
+A versão vem da **tag** (o `VersionPrefix` de [`src/Directory.Build.props`](https://github.com/afernandes/Engine.Scripting/blob/main/src/Directory.Build.props)
 serve a builds locais), separada em `VersionPrefix`/`VersionSuffix` — assim `v0.2.0-beta.1` publica
 como prerelease e cada projeto pode manter um sufixo próprio quando precisar.
 
@@ -437,7 +437,7 @@ Esta biblioteca é infraestrutura pura, sem domínio de negócio — **todo o c�
 
 ## Licença
 
-[MIT](LICENSE).
+[MIT](https://github.com/afernandes/Engine.Scripting/blob/main/LICENSE).
 
 ## Referências
 
