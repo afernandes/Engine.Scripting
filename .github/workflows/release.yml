@@ -53,29 +53,29 @@ jobs:
             echo "::error::Versão inválida: '$VERSION' (esperado SemVer, ex.: 0.1.1 ou 0.2.0-beta.1)"
             exit 1
           fi
-          echo "prefix=${VERSION%%-*}" >> "$GITHUB_OUTPUT"
-          case "$VERSION" in *-*) echo "suffix=${VERSION#*-}" >> "$GITHUB_OUTPUT" ;; *) echo "suffix=" >> "$GITHUB_OUTPUT" ;; esac
+          # ATENÇÃO: só passar -p:VersionSuffix quando houver sufixo. Passá-lo VAZIO cria uma
+          # global property imutável e anularia um VersionSuffix default de projeto.
+          PREFIX="${VERSION%%-*}"
+          case "$VERSION" in
+            *-*) ARGS="-p:VersionPrefix=$PREFIX -p:VersionSuffix=${VERSION#*-}" ;;
+            *)   ARGS="-p:VersionPrefix=$PREFIX" ;;
+          esac
+          echo "args=$ARGS" >> "$GITHUB_OUTPUT"
           echo "full=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Publicando versão $VERSION"
+          echo "Publicando versão $VERSION (args: $ARGS)"
 
       - name: Restore
         run: dotnet restore ${{ env.SOLUTION }}
 
       - name: Build
-        run: >-
-          dotnet build ${{ env.SOLUTION }} -c Release --no-restore
-          -p:VersionPrefix=${{ steps.version.outputs.prefix }}
-          -p:VersionSuffix=${{ steps.version.outputs.suffix }}
+        run: dotnet build ${{ env.SOLUTION }} -c Release --no-restore ${{ steps.version.outputs.args }}
 
       # Gate: nada é publicado com a suíte vermelha.
       - name: Test
         run: dotnet test ${{ env.SOLUTION }} -c Release --no-build
 
       - name: Pack
-        run: >-
-          dotnet pack ${{ env.SOLUTION }} -c Release --no-build -o artifacts/packages
-          -p:VersionPrefix=${{ steps.version.outputs.prefix }}
-          -p:VersionSuffix=${{ steps.version.outputs.suffix }}
+        run: dotnet pack ${{ env.SOLUTION }} -c Release --no-build -o artifacts/packages ${{ steps.version.outputs.args }}
 
       - name: Conferir pacotes
         run: ls -lh artifacts/packages/
