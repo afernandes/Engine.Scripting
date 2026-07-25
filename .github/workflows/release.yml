@@ -21,9 +21,12 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
   SOLUTION: Engine.Scripting.slnx
+  # Usuário do nuget.org dono da policy de Trusted Publishing (Package owner).
+  NUGET_USER: AndersonN
 
 permissions:
   contents: write   # criar o GitHub Release
+  id-token: write   # OIDC para o Trusted Publishing do nuget.org
 
 jobs:
   release:
@@ -86,18 +89,22 @@ jobs:
           name: nupkg-${{ steps.version.outputs.full }}
           path: artifacts/packages/*.nupkg
 
+      # Trusted Publishing (OIDC): troca o token do GitHub Actions por uma API key EFÊMERA do
+      # nuget.org — sem secret de longa duração para rotacionar. Exige a policy cadastrada em
+      # nuget.org (Package owner + este repositório + release.yml) e 'id-token: write' acima.
+      - name: Login no nuget.org (OIDC)
+        if: github.event_name == 'push' || inputs.dry_run == false
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ env.NUGET_USER }}
+
       - name: Publicar no nuget.org
         if: github.event_name == 'push' || inputs.dry_run == false
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
           set -euo pipefail
-          if [ -z "${NUGET_API_KEY:-}" ]; then
-            echo "::error::Secret NUGET_API_KEY não configurado (Settings > Secrets and variables > Actions)."
-            exit 1
-          fi
           dotnet nuget push "artifacts/packages/*.nupkg" \
-            --api-key "$NUGET_API_KEY" \
+            --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate
 

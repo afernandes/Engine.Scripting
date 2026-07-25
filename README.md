@@ -424,7 +424,11 @@ como prerelease e cada projeto pode manter um sufixo próprio quando precisar.
 
 **Para publicar:**
 
-1. Crie o secret `NUGET_API_KEY` em *Settings → Secrets and variables → Actions*.
+1. **Trusted Publishing** (já configurado): a publicação usa **OIDC** — o workflow troca o token do
+   GitHub Actions por uma API key **efêmera** via [`NuGet/login`](https://github.com/NuGet/login),
+   sem nenhum secret de longa duração para rotacionar. Exige a policy em *nuget.org → Trusted
+   Publishing* (Package owner + este repositório + `release.yml`) e `id-token: write` no workflow.
+   O usuário do nuget.org fica em `env.NUGET_USER`.
 2. `git tag v0.1.1 && git push origin v0.1.1`.
 3. Para ensaiar sem publicar: *Actions → Release → Run workflow* com `dry_run` marcado.
 
