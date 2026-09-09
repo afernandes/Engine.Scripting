@@ -36,6 +36,7 @@ public sealed class HttpAssemblyImageSource : IScriptAssemblyImageSource
     private readonly string _assemblyName;
     private readonly Uri _symbolsUrl;
     private readonly Lock _gate = new();
+    private readonly SemaphoreSlim _fetchGate = new(1, 1);
     private ScriptAssemblyImage? _latest;
     private string? _etag;
     private CancellationTokenSource? _watchCts;
@@ -259,6 +260,13 @@ public sealed class HttpAssemblyImageSource : IScriptAssemblyImageSource
     /// </summary>
     private async Task<FetchStatus> FetchAsync(CancellationToken cancellationToken)
     {
+        await _fetchGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { return await FetchCoreAsync(cancellationToken).ConfigureAwait(false); }
+        finally { _fetchGate.Release(); }
+    }
+
+    private async Task<FetchStatus> FetchCoreAsync(CancellationToken cancellationToken)
+    {
         using var request = new HttpRequestMessage(HttpMethod.Get, _options.ImageUrl);
 
         string? knownETag;
@@ -299,13 +307,12 @@ public sealed class HttpAssemblyImageSource : IScriptAssemblyImageSource
         var image = new ScriptAssemblyImage(_assemblyName, peBytes, pdbBytes);
         var newETag = response.Headers.ETag?.ToString();
 
+        await SaveToCacheAsync(image, newETag, cancellationToken).ConfigureAwait(false);
         lock (_gate)
         {
             _latest = image;
             _etag = newETag;
         }
-
-        await SaveToCacheAsync(image, newETag, cancellationToken).ConfigureAwait(false);
         Log.ImageDownloaded(_logger, _assemblyName, peBytes.Length, pdbBytes is not null, newETag);
         return FetchStatus.Downloaded;
     }
@@ -367,77 +374,72 @@ public sealed class HttpAssemblyImageSource : IScriptAssemblyImageSource
         }
     }
 
+    private string? CachePath => _options.CacheDirectory is null ? null : Path.Combine(
+        _options.CacheDirectory,
+        Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+            _options.ImageUrl.AbsoluteUri + "\n" + _options.ChecksumUrl?.AbsoluteUri))) + ".script-cache");
+
     private async Task SaveToCacheAsync(ScriptAssemblyImage image, string? etag, CancellationToken cancellationToken)
     {
-        if (_options.CacheDirectory is null)
-        {
-            return;
-        }
-
+        var path = CachePath;
+        if (path is null) return;
+        var temporaryPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            Directory.CreateDirectory(_options.CacheDirectory);
-
-            // Stale artifacts (possibly under a different assembly name) must not survive.
-            foreach (var pattern in (string[])["*.dll", "*.pdb", "*.etag"])
-            {
-                foreach (var stale in Directory.EnumerateFiles(_options.CacheDirectory, pattern))
-                {
-                    File.Delete(stale);
-                }
-            }
-
-            var dllPath = Path.Combine(_options.CacheDirectory, image.AssemblyName + ".dll");
-            await WriteAtomicAsync(dllPath, image.PeBytes, cancellationToken).ConfigureAwait(false);
-
-            if (image.PdbBytes is not null)
-            {
-                await WriteAtomicAsync(Path.ChangeExtension(dllPath, ".pdb"), image.PdbBytes, cancellationToken).ConfigureAwait(false);
-            }
-
-            if (etag is not null)
-            {
-                await WriteAtomicAsync(dllPath + ".etag", System.Text.Encoding.UTF8.GetBytes(etag), cancellationToken).ConfigureAwait(false);
-            }
+            Directory.CreateDirectory(_options.CacheDirectory!);
+            var entry = new CachedScriptImage(_options.ImageUrl.AbsoluteUri,
+                _options.ChecksumUrl?.AbsoluteUri, etag, image.PeBytes, image.PdbBytes,
+                Convert.ToHexString(SHA256.HashData(image.PeBytes)),
+                image.PdbBytes is null ? null : Convert.ToHexString(SHA256.HashData(image.PdbBytes)));
+            var bytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(entry);
+            await File.WriteAllBytesAsync(temporaryPath, bytes, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(temporaryPath, path, overwrite: true);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            Log.CacheWriteFailed(_logger, _options.CacheDirectory, exception);
+            Log.CacheWriteFailed(_logger, _options.CacheDirectory!, exception);
         }
-    }
-
-    private static async Task WriteAtomicAsync(string path, byte[] bytes, CancellationToken cancellationToken)
-    {
-        var temporaryPath = path + ".tmp";
-        await File.WriteAllBytesAsync(temporaryPath, bytes, cancellationToken).ConfigureAwait(false);
-        File.Move(temporaryPath, path, overwrite: true);
+        finally
+        {
+            try { File.Delete(temporaryPath); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                Log.CacheWriteFailed(_logger, _options.CacheDirectory!, exception);
+            }
+        }
     }
 
     private async Task<ScriptAssemblyImage?> TryLoadFromCacheAsync(CancellationToken cancellationToken)
     {
-        if (_options.CacheDirectory is null || !Directory.Exists(_options.CacheDirectory))
+        var path = CachePath;
+        if (path is null || !File.Exists(path)) return null;
+        CachedScriptImage? entry;
+        try
         {
-            return null;
+            var bytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
+            entry = System.Text.Json.JsonSerializer.Deserialize<CachedScriptImage>(bytes);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            throw new ScriptImageIntegrityException("The cached image is not a valid cache envelope.");
         }
 
-        var dllPath = Directory.EnumerateFiles(_options.CacheDirectory, "*.dll").FirstOrDefault();
-        if (dllPath is null)
+        if (entry is null || entry.Origin != _options.ImageUrl.AbsoluteUri
+            || entry.ChecksumUrl != _options.ChecksumUrl?.AbsoluteUri
+            || entry.PeBytes is null || !HashMatches(entry.PeBytes, entry.PeHash)
+            || (entry.PdbBytes is null ? entry.PdbHash is not null : !HashMatches(entry.PdbBytes, entry.PdbHash))
+            || (_options.ExpectedSha256 is not null && !HashMatches(entry.PeBytes, _options.ExpectedSha256)))
         {
-            return null;
+            throw new ScriptImageIntegrityException("The cached image failed origin or SHA-256 validation.");
         }
 
-        var image = await ScriptAssemblyImage.ReadFromFileAsync(dllPath, cancellationToken).ConfigureAwait(false);
-
-        var etagPath = dllPath + ".etag";
-        if (File.Exists(etagPath))
-        {
-            var cachedETag = await File.ReadAllTextAsync(etagPath, cancellationToken).ConfigureAwait(false);
-            lock (_gate)
-            {
-                _etag ??= cachedETag;
-            }
-        }
-
-        return image;
+        lock (_gate) { _etag ??= entry.ETag; }
+        return new ScriptAssemblyImage(_assemblyName, entry.PeBytes,
+            _options.DownloadSymbols ? entry.PdbBytes : null);
     }
+
+    private static bool HashMatches(byte[] bytes, string? expected)
+        => expected is not null && Convert.ToHexString(SHA256.HashData(bytes))
+            .Equals(expected, StringComparison.OrdinalIgnoreCase);
 }

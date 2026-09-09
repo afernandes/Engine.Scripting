@@ -12,9 +12,6 @@ namespace Engine.Scripting.StatePreservation.Tests;
 /// could never be restored onto the next generation's brand-new types), while host/BCL-typed
 /// values migrate.
 /// </summary>
-[CollectionDefinition("UnloadSensitive", DisableParallelization = true)]
-public sealed class UnloadSensitiveCollection;
-
 [Collection("UnloadSensitive")]
 public class AlcSafetyTests
 {
@@ -26,6 +23,15 @@ public class AlcSafetyTests
 
         public class StatefulScript
         {
+            [Engine.Scripting.Abstractions.HotReloadState]
+            public System.Action Callback = () => { };
+
+            [Engine.Scripting.Abstractions.HotReloadState]
+            public System.Type ScriptType = typeof(StatefulScript);
+
+            [Engine.Scripting.Abstractions.HotReloadState]
+            public System.Collections.Generic.List<object> Opaque = new() { new ScriptPayload() };
+
             [Engine.Scripting.Abstractions.HotReloadState]
             private int _safeCounter = 77;
 
@@ -66,7 +72,10 @@ public class AlcSafetyTests
         Assert.Contains("_unsafeList", snapshot.DiscardedMembers);
         Assert.DoesNotContain("_unsafePayload", snapshot.Values.Keys);
         Assert.DoesNotContain("_unsafeList", snapshot.Values.Keys);
-        Assert.Equal(2, logger.Collector.GetSnapshot().Count(r => r.Level == LogLevel.Warning));
+        Assert.Contains("Callback", snapshot.DiscardedMembers);
+        Assert.Contains("ScriptType", snapshot.DiscardedMembers);
+        Assert.Contains("Opaque", snapshot.DiscardedMembers);
+        Assert.Equal(5, logger.Collector.GetSnapshot().Count(r => r.Level == LogLevel.Warning));
     }
 
     private static async Task<Abstractions.ScriptAssemblyImage> CompileScriptAsync(CancellationToken cancellationToken)

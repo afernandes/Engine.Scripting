@@ -38,6 +38,8 @@ public sealed class HttpAssemblyImageSourceOptions
     /// Optional local directory where the last verified image (and its ETag) is persisted.
     /// Enables offline-first startup on devices: when the server is unreachable, the cached copy
     /// is served instead. Integrity failures never fall back to the cache.
+    /// Each origin uses a single atomically replaced envelope with hashes for the image and
+    /// symbols. Legacy loose DLL/PDB caches are ignored; populate the new cache online first.
     /// </summary>
     public string? CacheDirectory { get; init; }
 

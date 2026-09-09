@@ -10,12 +10,9 @@ namespace Engine.Scripting.Abstractions;
 /// instance is created, compatible values are written back onto the new instance.
 /// </para>
 /// <para>
-/// Only values whose runtime type lives <b>outside</b> the collectible script load context can
-/// migrate between generations (primitives, <see cref="string"/>, host/BCL types). Values of
-/// types declared inside the script assembly itself are discarded with a warning, because the
-/// reloaded assembly produces brand-new <see cref="Type"/> identities. Values transported inside
-/// <see cref="object"/>-typed containers cannot be inspected statically and are the consumer's
-/// responsibility.
+/// Collectible scripts preserve known scalar data types and arrays/List/Nullable containers
+/// composed of those types. Custom objects, opaque containers, delegates and reflection objects
+/// are discarded with a warning because they can retain the retiring generation.
 /// </para>
 /// <para>
 /// Properties must expose both a getter and a setter to participate. Static members are not
