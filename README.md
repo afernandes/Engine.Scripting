@@ -346,7 +346,7 @@ Duas observações esperadas: com debugger **anexado**, a coleta do ALC antigo p
 
 ## Ciclo de vida, estado e as regras do jogo
 
-- **O que migra entre gerações**: valores de tipos carregados **fora** do ALC do script — primitivos, `string`, enums e tipos do host/BCL/Abstractions. Valores de **tipos declarados no próprio script não migram** (a identidade do `Type` morre com a geração): são descartados na captura, com warning e registro em `ScriptStateSnapshot.DiscardedMembers`. Payload de script escondido em campo `object`/coleção de `object` escapa da checagem estática — responsabilidade do consumidor.
+- **O que migra entre gerações**: escalares conhecidos e arrays/`List<T>`/`Nullable<T>` de tipos seguros (ver política abaixo). Tipos do script, objetos customizados do host, delegates, reflexão e containers opacos são descartados na captura, com warning e registro em `ScriptStateSnapshot.DiscardedMembers`. Um campo `object` só migra quando seu valor concreto é um tipo seguro, como `int` ou `string`.
 - **Statics são resetados a cada reload** (nova assembly ⇒ novos statics) — exatamente o comportamento do domain reload da Unity. Estado que importa vive em campos de instância `[HotReloadState]`.
 - **`OnBeforeReloadAsync` é um contrato, não uma cortesia**: dessinscreva eventos do host, cancele timers e background tasks, solte handles nativos. Um script que não faz isso é a causa nº 1 de `AssemblyUnloadTimedOut`.
 - **Timeout de unload não aborta o reload**: a nova geração sobe, o vazamento fica limitado à geração presa e resolve sozinho quando a referência morrer. O evento existe para você caçar o culpado (o log lista os suspeitos clássicos).
@@ -362,6 +362,26 @@ Duas observações esperadas: com debugger **anexado**, a coleta do ALC antigo p
 | MAUI **Android** (MonoVM) | ⚠️ Parcial | Carregar/trocar DLL pré-compilada funciona (via `HttpAssemblyImageSource` com cache offline-first); a **coleta** do ALC descarregado não é garantida pelo MonoVM — memória da geração antiga pode ficar retida. Troque com parcimônia e valide no device |
 | iOS / MacCatalyst (AOT) | ❌ Não suportado | Sem JIT nem carregamento dinâmico pleno — mesma limitação do IL2CPP da Unity |
 | Blazor **WebAssembly** | ❌ Não suportado | Unload de ALC coletável não é confiável no runtime WASM |
+
+## Correções de lifecycle, estado e cache
+
+O descarte do orchestrator executa `OnBeforeReloadAsync` nas instâncias vivas e limpa suas
+referências antes de verificar o unload, inclusive quando um hook falha. A lib não chama
+`IDisposable` automaticamente nas instâncias: a limpeza de recursos continua sob responsabilidade
+do hook. Hooks precisam terminar cooperativamente.
+
+Em scripts coletáveis, snapshots agora aceitam somente escalares conhecidos (primitivos, enums
+não coletáveis, string, decimal, Guid e tipos de data/hora), arrays e `List<T>`/`Nullable<T>`
+compostos por esses tipos. Delegates, reflexão, containers opacos e objetos customizados do host
+são descartados com aviso. Essa política é mais restritiva que a versão 0.1.1.
+
+O cache HTTP usa um arquivo `.script-cache` por origem e configuração de manifesto. DLL, PDB,
+ETag e hashes são publicados juntos por substituição de arquivo, preservando a cópia anterior
+quando a gravação falha. A leitura offline valida origem, hashes e o hash pinado configurado.
+Caches antigos com DLL/PDB soltos não são importados: é necessária uma conexão inicial para
+popular o novo formato. No modo de manifesto remoto, a leitura offline usa o hash da última
+aquisição verificada; isso não é assinatura digital nem proteção contra alteração simultânea
+do payload e dos metadados por alguém com acesso de escrita ao cache.
 
 ## Limitações conhecidas
 

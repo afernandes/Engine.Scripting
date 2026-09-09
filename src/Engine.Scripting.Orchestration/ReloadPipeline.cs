@@ -166,6 +166,30 @@ internal sealed class ReloadPipeline
     private static ScriptDiagnostic PipelineDiagnostic(string id, string message)
         => new(id, ScriptDiagnosticSeverity.Error, message, DocumentId: null, Line: 0, Column: 0);
 
+    public async Task ShutdownAsync()
+    {
+        var entries = _registry.GetLiveEntries();
+        try
+        {
+            for (var i = 0; i < entries.Count; i++)
+            {
+                try
+                {
+                    await InvokeBeforeReloadAsync(entries[i].Value, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception exception)
+                {
+                    Log.BeforeReloadHookFailed(_logger, entries[i].Key.TypeFullName, exception);
+                }
+            }
+        }
+        finally
+        {
+            _registry.DetachAll();
+            entries = null!;
+        }
+    }
+
     private async Task SynchronizeSourcesAsync(
         ReloadTrigger trigger,
         string[] changedDocumentIds,

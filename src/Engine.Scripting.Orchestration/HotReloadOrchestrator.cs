@@ -236,6 +236,7 @@ public sealed class HotReloadOrchestrator : IAsyncDisposable, IDisposable
             Log.PipelineFaulted(_logger, exception);
         }
 
+        await _pipeline.ShutdownAsync().ConfigureAwait(false);
         await _context.DisposeAsync().ConfigureAwait(false);
 
         if (_ownsSource && _source is not null)

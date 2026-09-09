@@ -14,14 +14,12 @@ namespace Engine.Scripting.StatePreservation;
 /// Filtering here makes the snapshot structurally incapable of pinning the old generation.
 /// </para>
 /// <para>
-/// A migratable value is also a <i>restorable</i> value: types loaded outside the script context
-/// (BCL, host, abstractions) keep their identity across reloads, whereas a script-declared type
-/// has a brand-new <see cref="Type"/> in the next generation and could never be assigned anyway.
+/// Only known scalar data types, arrays and exact List/Nullable constructions over safe data
+/// types are accepted. Arbitrary host objects can transitively retain a collectible context.
 /// </para>
 /// <para>
-/// Known limitation (documented): values inspected are the <i>runtime</i> types of the captured
-/// object graph roots — a script-defined payload hidden inside an <c>object</c>-typed collection
-/// element escapes this static check.
+/// Opaque containers, delegates, reflection objects and custom host classes are rejected.
+/// No arbitrary getters or enumerable implementations are invoked by this policy.
 /// </para>
 /// </remarks>
 internal static class AlcSafetyInspector
@@ -44,32 +42,41 @@ internal static class AlcSafetyInspector
             return true;
         }
 
-        return IsTypeOutsideContext(value.GetType(), scriptContext);
+        return IsSafeDataType(value.GetType());
     }
 
-    private static bool IsTypeOutsideContext(Type type, AssemblyLoadContext scriptContext)
+    private static bool IsSafeDataType(Type type)
     {
-        if (AssemblyLoadContext.GetLoadContext(type.Assembly) == scriptContext)
+        if (type.Assembly.IsCollectible)
         {
             return false;
         }
 
         if (type.IsArray)
         {
-            return type.GetElementType() is not { } elementType || IsTypeOutsideContext(elementType, scriptContext);
+            return IsSafeDataType(type.GetElementType()!);
         }
 
         if (type.IsConstructedGenericType)
         {
+            var definition = type.GetGenericTypeDefinition();
+            if (definition != typeof(List<>) && definition != typeof(Nullable<>))
+            {
+                return false;
+            }
             foreach (var argument in type.GetGenericArguments())
             {
-                if (!IsTypeOutsideContext(argument, scriptContext))
+                if (!IsSafeDataType(argument))
                 {
                     return false;
                 }
             }
+            return true;
         }
 
-        return true;
+        return type.IsPrimitive || type.IsEnum || type == typeof(string)
+            || type == typeof(decimal) || type == typeof(Guid)
+            || type == typeof(DateTime) || type == typeof(DateTimeOffset)
+            || type == typeof(TimeSpan) || type == typeof(DateOnly) || type == typeof(TimeOnly);
     }
 }
