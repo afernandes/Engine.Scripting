@@ -6,6 +6,23 @@ namespace Engine.Scripting.StatePreservation.Tests;
 
 public class StatePreservationServiceTests
 {
+    private sealed class NullableState
+    {
+        [HotReloadState]
+        public int? Value { get; set; }
+    }
+
+    [Fact]
+    public void Restore_ValorNullablePreenchido_RestauraValor()
+    {
+        var source = new NullableState { Value = 42 };
+        var target = new NullableState();
+        var service = new StatePreservationService();
+
+        service.Restore(target, service.Capture(source));
+
+        Assert.Equal(42, target.Value);
+    }
     private sealed class SampleScript : SampleScriptBase
     {
         [HotReloadState] private int _counter = 5;

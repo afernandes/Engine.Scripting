@@ -115,7 +115,7 @@ public sealed class StatePreservationService
                     continue;
                 }
             }
-            else if (!member.MemberType.IsInstanceOfType(value))
+            else if (!IsCompatibleValue(member.MemberType, value))
             {
                 Log.IncompatibleValue(_logger, member.Key, value.GetType().FullName ?? "?", member.MemberType.FullName ?? "?");
                 continue;
@@ -141,5 +141,13 @@ public sealed class StatePreservationService
         }
 
         Log.StateRestored(_logger, restoredCount, typeName);
+    }
+
+    private static bool IsCompatibleValue(Type memberType, object value)
+    {
+        var underlyingType = Nullable.GetUnderlyingType(memberType);
+        return underlyingType is not null
+            ? underlyingType.IsInstanceOfType(value)
+            : memberType.IsInstanceOfType(value);
     }
 }

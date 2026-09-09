@@ -88,9 +88,10 @@ public sealed class HttpAssemblyImageSource : IScriptAssemblyImageSource
     /// </remarks>
     public async Task<ScriptAssemblyImage?> LoadImageAsync(CancellationToken cancellationToken)
     {
+        await _fetchGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var status = await FetchAsync(cancellationToken).ConfigureAwait(false);
+            var status = await FetchCoreAsync(cancellationToken).ConfigureAwait(false);
             if (status == FetchStatus.NotFound)
             {
                 return null;
@@ -121,12 +122,16 @@ public sealed class HttpAssemblyImageSource : IScriptAssemblyImageSource
                 Log.ImageServedFromFallback(_logger, "the locally cached", exception);
                 lock (_gate)
                 {
-                    _latest ??= cached;
-                    return _latest;
+                    _latest = cached;
+                    return cached;
                 }
             }
 
             throw;
+        }
+        finally
+        {
+            _fetchGate.Release();
         }
     }
 
@@ -377,7 +382,7 @@ public sealed class HttpAssemblyImageSource : IScriptAssemblyImageSource
     private string? CachePath => _options.CacheDirectory is null ? null : Path.Combine(
         _options.CacheDirectory,
         Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
-            _options.ImageUrl.AbsoluteUri + "\n" + _options.ChecksumUrl?.AbsoluteUri))) + ".script-cache");
+            _options.ImageUrl.AbsoluteUri + "\n" + _options.ChecksumUrl?.AbsoluteUri + "\n" + _symbolsUrl.AbsoluteUri))) + ".script-cache");
 
     private async Task SaveToCacheAsync(ScriptAssemblyImage image, string? etag, CancellationToken cancellationToken)
     {
@@ -388,7 +393,7 @@ public sealed class HttpAssemblyImageSource : IScriptAssemblyImageSource
         {
             Directory.CreateDirectory(_options.CacheDirectory!);
             var entry = new CachedScriptImage(_options.ImageUrl.AbsoluteUri,
-                _options.ChecksumUrl?.AbsoluteUri, etag, image.PeBytes, image.PdbBytes,
+                _options.ChecksumUrl?.AbsoluteUri, _symbolsUrl.AbsoluteUri, etag, image.PeBytes, image.PdbBytes,
                 Convert.ToHexString(SHA256.HashData(image.PeBytes)),
                 image.PdbBytes is null ? null : Convert.ToHexString(SHA256.HashData(image.PdbBytes)));
             var bytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(entry);
@@ -427,6 +432,7 @@ public sealed class HttpAssemblyImageSource : IScriptAssemblyImageSource
 
         if (entry is null || entry.Origin != _options.ImageUrl.AbsoluteUri
             || entry.ChecksumUrl != _options.ChecksumUrl?.AbsoluteUri
+            || entry.SymbolsUrl != _symbolsUrl.AbsoluteUri
             || entry.PeBytes is null || !HashMatches(entry.PeBytes, entry.PeHash)
             || (entry.PdbBytes is null ? entry.PdbHash is not null : !HashMatches(entry.PdbBytes, entry.PdbHash))
             || (_options.ExpectedSha256 is not null && !HashMatches(entry.PeBytes, _options.ExpectedSha256)))
