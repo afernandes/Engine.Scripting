@@ -8,6 +8,47 @@ public sealed class HttpCacheTests
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
+    [Fact]
+    public async Task LoadImageAsync_ChamadasSobrepostas_ApenasUmaAquisicaoEImagemConsistente()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        var active = 0;
+        var maximumActive = 0;
+        var handler = StubHttpMessageHandler.CreateAsync(async _ =>
+        {
+            Interlocked.Increment(ref calls);
+            var current = Interlocked.Increment(ref active);
+            while (current > Volatile.Read(ref maximumActive)
+                && Interlocked.CompareExchange(ref maximumActive, current, Volatile.Read(ref maximumActive)) < current)
+            {
+            }
+            entered.TrySetResult();
+            await release.Task;
+            Interlocked.Decrement(ref active);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            { Content = new ByteArrayContent([1, 2, 3]) };
+        });
+        await using var source = new HttpAssemblyImageSource(
+            new HttpAssemblyImageSourceOptions { ImageUrl = new Uri("https://example.test/scripts.dll"), DownloadSymbols = false },
+            new HttpClient(handler));
+
+        var first = source.LoadImageAsync(Token);
+        await entered.Task;
+        var second = source.LoadImageAsync(Token);
+        await Task.Delay(20, Token);
+        Assert.Equal(1, calls);
+        Assert.Equal(1, maximumActive);
+        release.SetResult();
+
+        var images = await Task.WhenAll(first, second);
+        Assert.Equal(new byte[] { 1, 2, 3 }, images[0]!.PeBytes);
+        Assert.Equal(images[0]!.PeBytes, images[1]!.PeBytes);
+        Assert.Equal(2, calls);
+        Assert.Equal(1, maximumActive);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

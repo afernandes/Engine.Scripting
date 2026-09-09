@@ -200,13 +200,20 @@ public sealed class HotReloadOrchestrator : IAsyncDisposable, IDisposable
             await _imageSource.StopWatchingAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        // Barrier: let an in-flight reload finish cleanly before cancelling the lifetime.
+        // Hold the gate while cancelling the lifetime. A debounce callback that is waiting for
+        // the gate then observes cancellation instead of starting between the barrier and
+        // shutdown teardown.
         await _reloadGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        _reloadGate.Release();
-
-        if (_lifetimeCts is not null)
+        try
         {
-            await _lifetimeCts.CancelAsync().ConfigureAwait(false);
+            if (_lifetimeCts is not null)
+            {
+                await _lifetimeCts.CancelAsync().ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            _reloadGate.Release();
         }
     }
 
